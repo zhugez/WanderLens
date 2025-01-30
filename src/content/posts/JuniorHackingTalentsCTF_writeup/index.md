@@ -3,7 +3,7 @@ title: Junior Hacking Talents CTF Writeup
 published: 2021-10-13
 description: ''
 image: ''
-tags: [CTFWriteup]
+tags: [Writeup]
 category: 'Cybersecurity'
 draft: false 
 lang: 'en'
