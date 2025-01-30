@@ -4,10 +4,11 @@ published: 2021-10-11
 description: ''
 image: ''
 tags: [CTFWriteup,Reversing Engineering]
-category: 'Cybersecurity's
+category: 'Cybersecurity'
 draft: false 
 lang: 'en'
 ---
+
 Bài này đề yêu cầu ta tìm key đúng với username "Root-Me".
 Đầu tiên check thử thì đây là file code bằng .Net và 32 bit.
 ![alt text](image.png)
