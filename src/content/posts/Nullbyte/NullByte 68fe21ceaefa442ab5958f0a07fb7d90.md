@@ -1,5 +1,5 @@
 ---
-title: "Pentesting Diary - Hack with Me: [5] NullByte"
+title: "Pentesting Diary - Hack with Me: [4] NullByte"
 published: 2022-06-12   
 description: ''
 image: ''

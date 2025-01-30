@@ -1,5 +1,5 @@
 ---
-title: "Pentesting Diary - Hack with Me: [4] Dev Guru"
+title: "Pentesting Diary - Hack with Me: [3] Dev Guru"
 published: 2022-05-29   
 description: ''
 image: ''
