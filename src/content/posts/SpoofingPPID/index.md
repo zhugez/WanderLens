@@ -1,6 +1,6 @@
 ---
 title: "Binary Classification and Linear Regression: A Comprehensive Analysis"
-published: 2023-11-08
+published: 2022-12-08
 description: ""
 image: ""
 tags:
