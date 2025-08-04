@@ -420,6 +420,7 @@ int main(int argc, char* argv[]) {
     return loader.run();
 }
 
+<<<<<<< HEAD
 ```
 With delay import
 ```cpp
@@ -851,4 +852,6 @@ int main(int argc, char* argv[]) {
     if (!loader.load(argv[1])) return 1;
     return loader.run();
 }
+=======
+>>>>>>> 93cc04e4db32631e32f7bdaf3f6cff45197fd7b4
 ```
