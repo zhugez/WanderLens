@@ -3,7 +3,7 @@ title: "Slice the Stack, Spot the Bug:  From Registers to Root Cause"
 published: 2025-04-22   
 description: ''
 image: ''
-tags: ["Linux","Red team tools", "Research"]
+tags: ["ctf", "writeup", "linux", "red-team-tools", "research"]
 category: 'Cybersecurity'
 draft: false 
 lang: 'en'

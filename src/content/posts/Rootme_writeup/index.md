@@ -3,7 +3,7 @@ title: Writeup PE .Net Keygenme
 published: 2021-10-11   
 description: ''
 image: ''
-tags: [Writeup,Reversing Engineering]
+tags: ["writeup", "reversing-engineering"]
 category: 'Cybersecurity'
 draft: false 
 lang: 'en'

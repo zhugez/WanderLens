@@ -3,7 +3,7 @@ title: "Pentesting Diary - Hack with Me: [3] Dev Guru"
 published: 2022-05-29   
 description: ''
 image: ''
-tags: [Writeup,"Pentesting Diary: Hack with Me"]
+tags: ["writeup", "pentesting-diary-hack-with-me"]
 category: 'Cybersecurity'
 draft: false 
 lang: 'en'

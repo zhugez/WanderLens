@@ -4,7 +4,7 @@ published: 2022-01-22
 description: ""
 image: ""
 tags:
-  - "WindowsInternal"
+  - "windows"
 category: "Cybersecurity"
 draft: false 
 lang: "en"
@@ -420,6 +420,7 @@ int main(int argc, char* argv[]) {
     return loader.run();
 }
 
+```
 <<<<<<< HEAD
 ```
 With delay import

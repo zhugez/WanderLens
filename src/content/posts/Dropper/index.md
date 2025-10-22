@@ -4,7 +4,7 @@ published: 2022-02-02
 description: ""
 image: ""
 tags:
-  - "WindowsInternal"
+  - "windows"
 category: "Cybersecurity"
 draft: false 
 lang: "en"

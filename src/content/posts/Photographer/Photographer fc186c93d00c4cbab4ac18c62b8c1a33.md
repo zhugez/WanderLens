@@ -3,7 +3,7 @@ title: "Pentesting Diary - Hack with Me: [2] Photographer"
 published: 2022-02-06   
 description: ''
 image: ''
-tags: [Writeup,"Pentesting Diary: Hack with Me"]
+tags: ["writeup", "pentesting-diary-hack-with-me"]
 category: 'Cybersecurity'
 draft: false 
 lang: 'en'

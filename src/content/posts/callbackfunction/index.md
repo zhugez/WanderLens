@@ -4,7 +4,7 @@ published: 2023-07-09
 description: ""
 image: ""
 tags:
-  - "WindowsInternal"
+  - "windows"
 category: "Cybersecurity"
 draft: false 
 lang: "en"

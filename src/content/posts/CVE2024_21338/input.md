@@ -4,7 +4,7 @@ published: 2024-09-25
 description: ""
 image: ""
 tags:
-  - "VulnResearch"
+  - "vuln-research"
 category: "Cybersecurity"
 draft: false 
 lang: "en"

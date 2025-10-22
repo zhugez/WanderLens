@@ -3,7 +3,7 @@ title: Pwnable.kr Writeup
 published: 2021-11-12
 description: ''
 image: ''
-tags: [Writeup]
+tags: ["writeup"]
 category: 'Cybersecurity'
 draft: false 
 lang: 'en'

@@ -4,7 +4,7 @@ published: 2022-12-08
 description: ""
 image: ""
 tags:
-  - "AI"
+  - "ai"
 category: "Cybersecurity"
 draft: false 
 lang: "en"

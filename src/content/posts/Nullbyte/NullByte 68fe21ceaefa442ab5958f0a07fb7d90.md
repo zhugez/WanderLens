@@ -3,7 +3,7 @@ title: "Pentesting Diary - Hack with Me: [4] NullByte"
 published: 2022-06-12   
 description: ''
 image: ''
-tags: [Writeup,"Pentesting Diary: Hack with Me"]
+tags: ["writeup", "pentesting-diary-hack-with-me"]
 category: 'Cybersecurity'
 draft: false 
 lang: 'en'
