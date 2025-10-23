@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:endy.gitbook.io)",
+      "Read(//e/Data/Media/Ebooks/**)",
+      "Bash(for file in \"C:\\Users\\dez\\Desktop\\WanderLens\\src\\content\\posts\"/**/index.md)",
+      "Bash(do echo \"=== $file ===\")",
+      "Bash(head:*)",
+      "Bash(done)",
+      "Bash(for dir in */)",
+      "Bash(do if [ -f \"$dir/index.md\" ])",
+      "Bash(then echo \"=== $dir ===\")",
+      "Bash(fi)",
+      "Bash(npm run build:*)",
+      "Bash(git init:*)",
+      "Bash(set GIT_CONFIG_NOSYSTEM=1)",
+      "Bash(git --no-optional-locks status:*)",
+      "Bash(where git:*)",
+      "Bash(git --version:*)",
+      "Bash(git -c core.repositoryformatversion=0 status:*)",
+      "Bash(findstr:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
