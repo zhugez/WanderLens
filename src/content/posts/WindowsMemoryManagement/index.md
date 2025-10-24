@@ -5,7 +5,7 @@ description: "Deep dive vào Windows memory management - virtual memory architec
 image: ""
 tags: ["windows", "memory-management", "kernel-exploitation"]
 category: "Cybersecurity"
-draft: true
+draft: false
 lang: "en"
 ---
 

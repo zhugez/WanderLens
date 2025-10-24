@@ -5,7 +5,7 @@ description: "Deep dive vào Windows process và thread internals - EPROCESS/KTH
 image: ""
 tags: ["windows", "process-internals", "privilege-escalation", "dkom"]
 category: "Cybersecurity"
-draft: true
+draft: false
 lang: "en"
 ---
 
