@@ -8,9 +8,6 @@ import { getSortedPosts } from '../utils/content-utils'
 
 export const getStaticPaths = (async ({ paginate }) => {
   const allBlogPosts = await getSortedPosts()
-  console.log("--- DEBUG: Building posts ---");
-  console.log(allBlogPosts.map(p => p.slug));
-  console.log(`--- DEBUG: Total posts found: ${allBlogPosts.length} ---`);
   return paginate(allBlogPosts, { pageSize: PAGE_SIZE })
 }) satisfies GetStaticPaths
 // https://github.com/withastro/astro/issues/6507#issuecomment-1489916992

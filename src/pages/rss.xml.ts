@@ -9,6 +9,9 @@ const parser = new MarkdownIt()
 
 export async function GET(context: APIContext) {
   const blog = await getSortedPosts()
+  console.log("--- DEBUG (from rss.xml.ts): Building posts ---");
+  console.log(blog.map(p => p.slug));
+  console.log(`--- DEBUG (from rss.xml.ts): Total posts found: ${blog.length} ---`);
 
   return rss({
     title: siteConfig.title,
