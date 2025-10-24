@@ -636,6 +636,3 @@ Knowledge về Windows architecture này là foundation cho advanced exploitatio
 - [System Informer](https://github.com/winsiderss/systeminformer) - System exploration tool
 - [WinDbg Preview](https://apps.microsoft.com/detail/9PGJGD53TN86) - Modern Windows debugger
 
----
-
-<h2><strong style="color: red;">Master the fundamentals, exploit the system.</strong></h2>
