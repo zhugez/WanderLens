@@ -47,6 +47,11 @@ export const navBarConfig: NavBarConfig = {
       url: 'https://github.com/zhugez/wanderlens',     // Internal links should not include the base path, as it is automatically added
       external: true,                               // Show an external link icon and will open in a new tab
     },
+    {
+      name: 'BeZhu Blog',
+      url: 'https://bezhuhocdevmeow.vercel.app/',
+      external: true,
+    },
   ],
 }
 
