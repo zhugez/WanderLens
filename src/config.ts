@@ -48,7 +48,7 @@ export const navBarConfig: NavBarConfig = {
       external: true,                               // Show an external link icon and will open in a new tab
     },
     {
-      name: 'BeZhu Blog',
+      name: 'Research Notes',
       url: 'https://bezhuhocdevmeow.vercel.app/',
       external: true,
     },
