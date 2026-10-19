@@ -84,7 +84,7 @@ const { remarkPluginFrontmatter } = await entry.render()
             </Icon>
         </div>
         <ImageWrapper src={image} basePath={path.join("content/posts/", getDir(entry.id))} alt="Cover Image of the Post"
-                  class="w-full h-full">
+                  class="w-full h-full" widths={[384, 640]} sizes="(max-width: 768px) 100vw, 384px">
         </ImageWrapper>
     </a>}
 

@@ -329,7 +329,6 @@ function initCustomScrollbar() {
 function showBanner() {
 	const banner = document.getElementById('banner')
 	if (!banner) {
-		console.error('Failed to find the banner element')
 		return
 	}
 	banner.classList.remove('opacity-0', 'scale-105')
@@ -339,8 +338,12 @@ function init() {
 	// disableAnimation()()		// TODO
 	loadTheme();
 	loadHue();
-	initCustomScrollbar();
 	showBanner();
+	if ('requestIdleCallback' in window) {
+		requestIdleCallback(initCustomScrollbar);
+	} else {
+		setTimeout(initCustomScrollbar, 100);
+	}
 }
 
 /* Load settings when entering the site */
@@ -465,7 +468,18 @@ function scrollFunction() {
 		}
 	}
 }
-window.onscroll = scrollFunction
+
+let isScrolling = false
+function onScroll() {
+	if (!isScrolling) {
+		window.requestAnimationFrame(() => {
+			scrollFunction()
+			isScrolling = false
+		})
+		isScrolling = true
+	}
+}
+window.addEventListener('scroll', onScroll, { passive: true })
 
 window.onresize = () => {
 	// calculate the --banner-height-extend, which needs to be a multiple of 4 to avoid blurry text

@@ -9,14 +9,11 @@ const parser = new MarkdownIt()
 
 export async function GET(context: APIContext) {
   const blog = await getSortedPosts()
-  console.log("--- DEBUG (from rss.xml.ts): Building posts ---");
-  console.log(blog.map(p => p.slug));
-  console.log(`--- DEBUG (from rss.xml.ts): Total posts found: ${blog.length} ---`);
 
   return rss({
     title: siteConfig.title,
     description: siteConfig.subtitle || 'No description',
-    site: context.site ?? 'https://fuwari.vercel.app',
+    site: context.site ?? 'https://wanderlens.vercel.app',
     items: blog.map(post => {
       return {
         title: post.data.title,
