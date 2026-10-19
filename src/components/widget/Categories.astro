@@ -29,7 +29,6 @@ const style = Astro.props.style
         <ButtonLink
             url={getCategoryUrl(c.name)}
             badge={String(c.count)}
-            label=`${c.name} (${c.count})`
         >
             {c.name}
         </ButtonLink>

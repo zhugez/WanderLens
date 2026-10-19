@@ -16,7 +16,7 @@ const config = profileConfig
                   class="transition opacity-0 scale-90 group-hover:scale-100 group-hover:opacity-100 text-white text-5xl">
             </Icon>
         </div>
-        <ImageWrapper src={config.avatar || ""} alt="Profile Image of the Author" class="mx-auto lg:w-full h-full lg:mt-0 " widths={[256, 384, 512]} sizes="(max-width: 1024px) 192px, 256px"></ImageWrapper>
+        <ImageWrapper src={config.avatar || ""} alt="Profile Image of the Author" class="mx-auto lg:w-full h-full lg:mt-0 " widths={[192, 256, 384, 512]} sizes="(max-width: 640px) 168px, (max-width: 1024px) 192px, 256px" loading="eager" fetchpriority="high"></ImageWrapper>
     </a>
     <div class="px-2">
         <div class="font-bold text-xl text-center mb-1 dark:text-neutral-50 transition">{config.name}</div>
