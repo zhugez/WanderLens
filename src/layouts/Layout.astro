@@ -293,6 +293,10 @@ function initCustomScrollbar() {
 				autoHideSuspend: false
 			}
 		});
+		const viewport = ele.querySelector('[data-overlayscrollbars-viewport]');
+		if (viewport) {
+			viewport.setAttribute('tabindex', '0');
+		}
 	});
 	const katexElements = document.querySelectorAll('.katex-display') as NodeListOf<HTMLElement>;
 	katexElements.forEach((ele) => {

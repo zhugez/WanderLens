@@ -9,8 +9,9 @@ interface Props {
   keyword?: string
   tags?: string[]
   categories?: string[]
+  title?: string
 }
-const { keyword, tags, categories } = Astro.props
+const { keyword, tags, categories, title } = Astro.props
 
 let posts = await getSortedPosts()
 
@@ -66,6 +67,7 @@ function formatTag(tag: string[]) {
 ---
 
 <div class="card-base px-8 py-6">
+    <h1 class="sr-only">{title || i18n(I18nKey.archive)}</h1>
     {
         groups.map(group => (
             <div>
