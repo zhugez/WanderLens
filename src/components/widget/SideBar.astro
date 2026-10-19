@@ -14,7 +14,7 @@ const className = Astro.props.class
 const headings = Astro.props.headings
 
 ---
-<div id="sidebar" class:list={[className, "w-full"]}>
+<aside id="sidebar" aria-label="Sidebar" class:list={[className, "w-full"]}>
     <div class="flex flex-col w-full gap-4 mb-4">
         <Profile></Profile>
     </div>
@@ -22,4 +22,4 @@ const headings = Astro.props.headings
         <Categories class="onload-animation" style="animation-delay: 150ms"></Categories>
         <Tag class="onload-animation" style="animation-delay: 200ms"></Tag>
     </div>
-</div>
+</aside>
