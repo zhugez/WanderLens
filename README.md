@@ -6,6 +6,8 @@ A blog about Windows internals and security research. 22 posts, 2021 to now.
 
 ## What's in it
 
+Most posts follow the same shape: describe a structure, show it on a live machine in a debugger, then do something with it. That means `kd>` output and source snippets next to the explanation, not a summary of it. Posts are written in Vietnamese or English.
+
 **Windows internals.** Process and thread structures (`EPROCESS`, `KTHREAD`), virtual memory and page tables, user mode versus kernel mode, callback functions, and a self-deleting binary built on `FileRenameInfo` and `FileDispositionInfo` over NTFS alternate data streams.
 
 **Kernel privilege escalation.** A writeup of CVE-2024-21338, taking an admin session to kernel mode.

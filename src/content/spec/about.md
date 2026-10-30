@@ -1,27 +1,23 @@
-<!-- # About
-This is the demo site for [](https://github.com/saicaca/fuwari).
+## About
 
-::github{repo="saicaca/fuwari"}
+I'm Yasna. I write about Windows internals and security research.
 
-> ### Sources of images used in this site
+Most posts follow the same shape: describe a structure, show it on a live machine in a debugger, then do something with it. The process and thread post walks `_EPROCESS`, `_KTHREAD` and the token, prints them with `!process` in WinDbg, then abuses the token through `DuplicateTokenEx` and named-pipe impersonation, and closes on DKOM and thread injection. The memory post covers 4-level paging, VAD trees, the PFN database and paged versus non-paged pools, with the `kd>` output sitting next to each explanation.
+
+What's in the archive:
+
+- **Windows internals** — process and thread structures, virtual memory and page tables, user mode versus kernel mode, callback functions, self-deletion through `FileRenameInfo` and `FileDispositionInfo`
+- **Exploitation** — CVE-2024-21338, admin to kernel; loading a PE into a remote process; a dropper written in C++
+- **Malware analysis** — the Meterpreter lifecycle, from stager to in-memory session
+- **Pentesting Diary** — four practice machines: Hack kid 1.0.1, Photographer, Dev Guru, NullByte
+- **CTF writeups** — pwnable.kr, Root-Me, Junior Hacking Talents
+- **Tooling** — wiring `CLIPROXYAPI` into Claude Code
+
+Posts are written in Vietnamese or English. Everything since 2021 is in the [archive](/archive/).
+
+Elsewhere: [GitHub](https://github.com/zhugez) · [X](https://twitter.com/dezzhu1) · [LinkedIn](https://www.linkedin.com/in/dezzhu/) · [Facebook](https://facebook.com/dezzhu.info)
+
+> ### Image credits
 > - [Unsplash](https://unsplash.com/)
 > - [星と少女](https://www.pixiv.net/artworks/108916539) by [Stella](https://www.pixiv.net/users/93273965)
-> - [Rabbit - v1.4 Showcase](https://civitai.com/posts/586908) by [Rabbit_YourMajesty](https://civitai.com/user/Rabbit_YourMajesty) -->
-## 🚀 ABOUT ME – AI & SECURITY ENTHUSIAST  
-
-I am **Yasna**, an **AI researcher and cybersecurity specialist** with a deep-seated passion for **Web Security, Malware Development, and NLP Research**. My work is driven by the pursuit of cutting-edge advancements at the intersection of **artificial intelligence and cybersecurity**, where innovation meets the imperative of security.  
-
-💡 **MY PHILOSOPHY**  
-In an era where technological progress accelerates exponentially, **cyber threats are evolving in tandem, becoming increasingly sophisticated and pervasive**. Security should not be an afterthought—it must be **a fundamental pillar of every technological breakthrough**. My objective is to **decode complex cybersecurity challenges through AI-powered solutions** while continuously expanding the frontiers of **Deep Learning and Natural Language Processing research**.  
-
-🔎 **WHAT TO EXPECT**  
-- **Web Security** – In-depth analysis of vulnerabilities, attack vectors, and defense mechanisms.  
-- **CTF Writeups** – Dissecting real-world challenges, exploitation techniques, and security methodologies.  
-- **Malware & Reverse Engineering** – Deconstructing malicious code, analyzing threats, and fortifying defenses.  
-- **AI & NLP Research** – Exploring AI’s transformative potential in cybersecurity and beyond.  
-
-🔥 **MY VISION**  
-I strive to bridge the gap between **AI and cybersecurity**, developing solutions that are not only **technologically sophisticated but also resilient and secure**. Through my research and knowledge-sharing, I seek to **demystify cybersecurity concepts, contribute to the academic and professional community, and advance the state of the art in AI-driven security**.  
-
-🚀 **JOIN ME ON THIS JOURNEY**  
-Let’s navigate the complexities of **AI-powered security, ethical hacking, and advanced research** together. Connect with me on **[LinkedIn | Twitter | GitHub]**, and let’s **shape the future of cybersecurity and artificial intelligence**.
+> - [Rabbit - v1.4 Showcase](https://civitai.com/posts/586908) by [Rabbit_YourMajesty](https://civitai.com/user/Rabbit_YourMajesty)
