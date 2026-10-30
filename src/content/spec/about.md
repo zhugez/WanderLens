@@ -1,13 +1,24 @@
-## About
+## About me
 
-I'm Yasna. I take Windows apart in a debugger and write down what I find.
+I am Yasna, an AI researcher and cybersecurity specialist. My work sits where artificial intelligence and security meet: web security, malware development, and NLP research.
 
-22 posts, going back to 2021. They are long, and they assume you want the mechanism rather than a summary of it. The PE loading post walks manual mapping from the PEB through fixing the IAT and relocations, parameter hijacking, and execution strategy, and ends with a working proof of concept. The CVE-2024-21338 post analyses `appid.sys` and its IOCTL surface, then works through SMEP and kCFG before the demo. The memory post runs from four-level paging to VAD trees to the PFN database to paged and non-paged pools, with the WinDbg session printed alongside each step. The Meterpreter post goes through metsrv, the TLV protocol, transports, the extension model, and the session lifecycle.
+### My philosophy
 
-Around those: a self-deleting binary built on `FileRenameInfo` and `FileDispositionInfo`, token theft through `DuplicateTokenEx` and named-pipe impersonation, DKOM, thread injection, four practice machines from the Pentesting Diary series, and CTF writeups for pwnable.kr, Root-Me and Junior Hacking Talents.
+Threats get more sophisticated every year, and security is usually the last thing added to a product and the first thing cut. So I write about the mechanism instead of the headline: how the structure is laid out, where the check is missing, what the exploit actually does when it runs. That is the part that survives contact with a real target.
 
-Everything is in the [archive](/archive/), written in Vietnamese or English.
+### What to expect
 
-Elsewhere: [GitHub](https://github.com/zhugez) · [X](https://twitter.com/dezzhu1) · [LinkedIn](https://www.linkedin.com/in/dezzhu/) · [Facebook](https://facebook.com/dezzhu.info)
+- **Web security** — vulnerability analysis, attack vectors, and the defenses that actually hold.
+- **CTF writeups** — pwnable.kr, Root-Me, Junior Hacking Talents.
+- **Malware and reverse engineering** — manual PE loading, the Meterpreter lifecycle, DKOM, self-deleting binaries.
+- **AI and NLP research** — wiring CLIPROXYAPI into Claude Code, classification and regression experiments.
+
+### My vision
+
+Bridge the gap between AI and cybersecurity: build solutions that are sophisticated and resilient at the same time, and explain the concepts well enough that other people can use them. Everything I publish is in the [archive](/archive/), in Vietnamese or English.
+
+### Where to find me
+
+[GitHub](https://github.com/zhugez) · [X](https://twitter.com/dezzhu1) · [LinkedIn](https://www.linkedin.com/in/dezzhu/) · [Facebook](https://facebook.com/dezzhu.info)
 
 <sub>Avatar art: [星と少女](https://www.pixiv.net/artworks/108916539) by [Stella](https://www.pixiv.net/users/93273965). Other theme imagery: [Unsplash](https://unsplash.com/), [Civitai](https://civitai.com/posts/586908).</sub>
