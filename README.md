@@ -1,50 +1,81 @@
-# 🍥 Wanderlens
+# WanderLens
 
-## ✨ Features
+A blog about Windows internals and security research. 22 posts, 2021 to now.
 
-- [x] Built with [Astro](https://astro.build) and [Tailwind CSS](https://tailwindcss.com)
-- [x] Smooth animations and page transitions
-- [x] Light / dark mode
-- [x] Customizable theme colors & banner
-- [x] Responsive design
-- [ ] Comments
-- [x] Search
-- [ ] TOC
+[**Read it**](https://wanderlens.vercel.app) · [**Archive**](https://wanderlens.vercel.app/archive/) · [**About**](https://wanderlens.vercel.app/about/)
 
-## 🚀 How to Use
+## What's in it
 
-1. [Generate a new repository](https://github.com/zhugez/wanderlens/generate) from this template or fork this repository.
-2. To edit your blog locally, clone your repository, run `pnpm install` AND `pnpm add sharp` to install dependencies.
-   - Install [pnpm](https://pnpm.io) `npm install -g pnpm` if you haven't.
-3. Edit the config file `src/config.ts` to customize your blog.
-4. Run `pnpm new-post <filename>` to create a new post and edit it in `src/content/posts/`.
-5. Deploy your blog to Vercel, Netlify, GitHub Pages, etc. following [the guides](https://docs.astro.build/en/guides/deploy/). You need to edit the site configuration in `astro.config.mjs` before deployment.
+**Windows internals.** Process and thread structures (`EPROCESS`, `KTHREAD`), virtual memory and page tables, user mode versus kernel mode, callback functions, and a self-deleting binary built on `FileRenameInfo` and `FileDispositionInfo` over NTFS alternate data streams.
 
-## ⚙️ Frontmatter of Posts
+**Kernel privilege escalation.** A writeup of CVE-2024-21338, taking an admin session to kernel mode.
+
+**PE loading and code injection.** Loading a PE into a remote process, the loader mechanics behind it, and a dropper written in C++.
+
+**Malware analysis.** A walkthrough of the Meterpreter lifecycle, from stager to in-memory session.
+
+**Pentesting Diary.** Four writeups of practice machines — Hack kid 1.0.1, Photographer, Dev Guru, NullByte.
+
+**CTF and debugging.** pwnable.kr, Root-Me, Junior Hacking Talents, and a stack-based exercise that starts from registers and ends at a root cause.
+
+**Tooling.** Wiring `CLIPROXYAPI` into Claude Code.
+
+Posts are filed under three categories: Cybersecurity (20), Developing (1), Tutorial (1). Tag vocabulary is defined in [`TAG_STANDARDS.md`](TAG_STANDARDS.md).
+
+## Stack
+
+Astro 5 · Svelte 5 · Tailwind 3 · KaTeX · Pagefind · Swup · Biome · pnpm
+
+The theme is [Fuwari](https://github.com/saicaca/fuwari) by [saicaca](https://github.com/saicaca), MIT licensed. Search is indexed at build time by Pagefind, math is rendered by KaTeX through `remark-math` and `rehype-katex`, and page navigation is handled by Swup.
+
+## Running locally
+
+Requires Node.js 20+ and pnpm.
+
+```bash
+pnpm install
+pnpm dev            # http://localhost:4321
+```
+
+Other scripts:
+
+```bash
+pnpm build          # astro build, then build the Pagefind index
+pnpm preview        # serve the production build
+pnpm type-check     # tsc --noEmit
+pnpm lint           # biome check
+pnpm format         # biome format --write
+```
+
+## Writing a post
+
+```bash
+pnpm new-post <slug>
+```
+
+That creates `src/content/posts/<slug>/index.md`. Frontmatter:
 
 ```yaml
 ---
-title: My First Blog Post
-published: 2023-09-09
-description: This is the first post of my new Astro blog.
-image: ./cover.jpg
-tags: [Foo, Bar]
-category: Front-end
+title: "Post title"
+published: 2026-01-22
+description: ""
+image: ""
+tags: ["WindowsInternals"]
+category: "Cybersecurity"
 draft: false
-lang: jp      # Set only if the post's language differs from the site's language in `config.ts`
+lang: "en"
 ---
 ```
 
-## 🧞 Commands
+Images sit in the same directory as the post. `draft: true` keeps a post out of the build.
 
-All commands are run from the root of the project, from a terminal:
+## Deployment
 
-| Command                             | Action                                           |
-|:------------------------------------|:-------------------------------------------------|
-| `pnpm install` AND `pnpm add sharp` | Installs dependencies                            |
-| `pnpm dev`                          | Starts local dev server at `localhost:4321`      |
-| `pnpm build`                        | Build your production site to `./dist/`          |
-| `pnpm preview`                      | Preview your build locally, before deploying     |
-| `pnpm new-post <filename>`          | Create a new post                                |
-| `pnpm astro ...`                    | Run CLI commands like `astro add`, `astro check` |
-| `pnpm astro --help`                 | Get help using the Astro CLI                     |
+The site is deployed on Vercel. `vercel.json` is empty, so the defaults apply: `pnpm build` produces `dist/`, which Vercel serves as static output. Nothing else needs configuring.
+
+## License
+
+Code: [MIT](LICENSE).
+
+Posts and images: © the author, all rights reserved. The Fuwari theme is MIT licensed and its own license applies to the theme code.
