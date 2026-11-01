@@ -104,14 +104,26 @@ loadButtonScript();
 </script>
 
 {import.meta.env.PROD && <script is:inline define:vars={{scriptUrl: url('/pagefind/pagefind.js')}}>
-async function loadPagefind() {
+let pagefindLoading = false
+window.loadPagefind = async function() {
+    if (window.pagefind || pagefindLoading) return
+    pagefindLoading = true
     const pagefind = await import(scriptUrl)
     await pagefind.options({
         'excerptLength': 20
     })
     pagefind.init()
     window.pagefind = pagefind
-    pagefind.search('')     // speed up the first search
 }
-loadPagefind()
+const searchBar = document.getElementById('search-bar')
+const searchSwitch = document.getElementById('search-switch')
+searchBar?.addEventListener('focusin', window.loadPagefind, { once: true })
+searchBar?.addEventListener('mouseenter', window.loadPagefind, { once: true })
+searchSwitch?.addEventListener('click', window.loadPagefind, { once: true })
+searchSwitch?.addEventListener('mouseenter', window.loadPagefind, { once: true })
+if ('requestIdleCallback' in window) {
+    requestIdleCallback(() => {
+        setTimeout(window.loadPagefind, 3000)
+    })
+}
 </script>}
